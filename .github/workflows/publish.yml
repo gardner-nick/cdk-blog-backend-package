@@ -52,11 +52,17 @@ jobs:
       - if: steps.check.outputs.should_publish == 'true'
         run: npm test
 
-      # No NODE_AUTH_TOKEN: auth is via OIDC Trusted Publishing (configured on
-      # npmjs.com). npm auto-detects the OIDC token using the `id-token: write`
-      # permission above. Provenance is implied by trusted publishing.
+      # Bootstrap publish via a classic npm automation token (NPM_TOKEN secret).
+      # Trusted Publishing can't be configured until the package name exists on
+      # npmjs.com, so the first release uses token auth. Provenance is omitted
+      # here because it requires OIDC. Once the package is published and a
+      # trusted publisher is configured, switch back to:
+      #   run: npm publish --provenance --access public
+      # (drop the env block below) and rely on the `id-token: write` permission.
       - if: steps.check.outputs.should_publish == 'true'
-        run: npm publish --provenance --access public
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Tag release
         if: steps.check.outputs.should_publish == 'true'
