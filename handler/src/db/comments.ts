@@ -3,7 +3,7 @@ import { DeleteCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { docClient } from './client';
 import { config } from '../config';
 import { HttpError } from '../http';
-import { encodeCursor, decodeCursor } from '../cursor';
+import { encodeCursor, decodeCursor, queryWithCursorGuard } from '../cursor';
 import { KEY_PREFIX } from '../../../src/constants';
 import type { CreateCommentInput } from '../validation';
 
@@ -48,15 +48,17 @@ export async function listComments(params: {
   limit: number;
   cursor?: string;
 }): Promise<ListCommentsResult> {
-  const result = await docClient.send(
-    new QueryCommand({
-      TableName: config.tableName,
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :skPrefix)',
-      ExpressionAttributeValues: { ':pk': postPK(params.slug), ':skPrefix': KEY_PREFIX.COMMENT },
-      ScanIndexForward: false,
-      Limit: params.limit,
-      ExclusiveStartKey: params.cursor ? decodeCursor(params.cursor) : undefined,
-    })
+  const result = await queryWithCursorGuard(params.cursor, () =>
+    docClient.send(
+      new QueryCommand({
+        TableName: config.tableName,
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :skPrefix)',
+        ExpressionAttributeValues: { ':pk': postPK(params.slug), ':skPrefix': KEY_PREFIX.COMMENT },
+        ScanIndexForward: false,
+        Limit: params.limit,
+        ExclusiveStartKey: params.cursor ? decodeCursor(params.cursor) : undefined,
+      })
+    )
   );
 
   return {
@@ -86,17 +88,27 @@ export async function createComment(slug: string, input: CreateCommentInput): Pr
 }
 
 export async function deleteComment(slug: string, id: string): Promise<void> {
-  const result = await docClient.send(
-    new QueryCommand({
-      TableName: config.tableName,
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :skPrefix)',
-      FilterExpression: '#id = :id',
-      ExpressionAttributeNames: { '#id': 'id' },
-      ExpressionAttributeValues: { ':pk': postPK(slug), ':skPrefix': KEY_PREFIX.COMMENT, ':id': id },
-    })
-  );
+  // The filter is applied after each 1MB page is read, so keep paging until
+  // the id shows up — otherwise comments past the first page can never be
+  // found (and so never deleted).
+  let item: CommentItem | undefined;
+  let exclusiveStartKey: Record<string, unknown> | undefined;
 
-  const item = (result.Items ?? [])[0] as CommentItem | undefined;
+  do {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: config.tableName,
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :skPrefix)',
+        FilterExpression: '#id = :id',
+        ExpressionAttributeNames: { '#id': 'id' },
+        ExpressionAttributeValues: { ':pk': postPK(slug), ':skPrefix': KEY_PREFIX.COMMENT, ':id': id },
+        ExclusiveStartKey: exclusiveStartKey,
+      })
+    );
+    item = (result.Items ?? [])[0] as CommentItem | undefined;
+    exclusiveStartKey = result.LastEvaluatedKey;
+  } while (!item && exclusiveStartKey);
+
   if (!item) {
     throw new HttpError(404, 'not_found', `No comment found with id "${id}".`);
   }

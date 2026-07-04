@@ -76,6 +76,23 @@ describe('deleteComment', () => {
     const call = ddbMock.commandCalls(DeleteCommand)[0];
     expect(call.args[0].input.Key).toEqual({ PK: 'POST#hello', SK: 'COMMENT#2026-01-01#abc' });
   });
+
+  it('pages past a filtered-out first page to find the comment', async () => {
+    const lastKey = { PK: 'POST#hello', SK: 'COMMENT#2026-01-01#zzz' };
+    ddbMock
+      .on(QueryCommand)
+      .resolvesOnce({ Items: [], LastEvaluatedKey: lastKey })
+      .resolvesOnce({ Items: [{ PK: 'POST#hello', SK: 'COMMENT#2026-01-02#abc', id: 'abc' }] });
+    ddbMock.on(DeleteCommand).resolves({});
+
+    await comments.deleteComment('hello', 'abc');
+
+    const queryCalls = ddbMock.commandCalls(QueryCommand);
+    expect(queryCalls).toHaveLength(2);
+    expect(queryCalls[1].args[0].input.ExclusiveStartKey).toEqual(lastKey);
+    const del = ddbMock.commandCalls(DeleteCommand)[0];
+    expect(del.args[0].input.Key).toEqual({ PK: 'POST#hello', SK: 'COMMENT#2026-01-02#abc' });
+  });
 });
 
 describe('comments disabled via route guard (draft post 404s)', () => {

@@ -13,7 +13,6 @@ export const config = {
   gsi1Name: required(ENV_VARS.GSI1_NAME),
   assetsBucketName: process.env[ENV_VARS.ASSETS_BUCKET_NAME],
   commentsEnabled: process.env[ENV_VARS.COMMENTS_ENABLED] !== 'false',
-  requireAuthForComments: process.env[ENV_VARS.REQUIRE_AUTH_FOR_COMMENTS] === 'true',
   presignExpirySeconds: process.env[ENV_VARS.PRESIGN_EXPIRY_SECONDS]
     ? Number(process.env[ENV_VARS.PRESIGN_EXPIRY_SECONDS])
     : DEFAULT_PRESIGN_EXPIRY_SECONDS,

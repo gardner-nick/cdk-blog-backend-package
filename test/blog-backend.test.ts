@@ -85,7 +85,6 @@ describe('BlogBackend defaults', () => {
         Variables: Match.objectLike({
           GSI1_NAME: 'GSI1',
           COMMENTS_ENABLED: 'true',
-          REQUIRE_AUTH_FOR_COMMENTS: 'false',
           PRESIGN_EXPIRY_SECONDS: '900',
         }),
       },

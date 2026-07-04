@@ -7,13 +7,21 @@ const slugSchema = z
   .max(200)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'slug must be lowercase alphanumeric with hyphens');
 
+// Deduped at the schema so downstream code can write one tag item per entry:
+// duplicate tags would otherwise put the same key twice in one
+// TransactWriteItems, which DynamoDB rejects.
+const tagsSchema = z
+  .array(z.string().min(1).max(50))
+  .max(50)
+  .transform((tags) => Array.from(new Set(tags)));
+
 export const createPostSchema = z.object({
   title: z.string().min(1).max(300),
   slug: slugSchema.optional(),
   excerpt: z.string().max(1000).optional(),
   content: z.string().min(1),
   status: z.enum([POST_STATUS.DRAFT, POST_STATUS.PUBLISHED]).default(POST_STATUS.DRAFT),
-  tags: z.array(z.string().min(1).max(50)).max(50).default([]),
+  tags: tagsSchema.default([]),
 });
 
 export type CreatePostInput = z.infer<typeof createPostSchema>;
@@ -23,7 +31,7 @@ export const updatePostSchema = z.object({
   excerpt: z.string().max(1000).optional(),
   content: z.string().min(1).optional(),
   status: z.enum([POST_STATUS.DRAFT, POST_STATUS.PUBLISHED]).optional(),
-  tags: z.array(z.string().min(1).max(50)).max(50).optional(),
+  tags: tagsSchema.optional(),
 });
 
 export type UpdatePostInput = z.infer<typeof updatePostSchema>;

@@ -51,9 +51,19 @@ export async function listAdminPosts(
     return ok({ items: result.items, nextCursor: result.nextCursor });
   }
 
+  // The combined view concatenates two GSI partitions; a single cursor cannot
+  // address both, so pagination is only offered per status.
+  if (query.cursor) {
+    throw new HttpError(
+      400,
+      'invalid_cursor',
+      'The combined admin list is not paginated; pass status=draft or status=published to use cursors.'
+    );
+  }
+
   const [draft, published] = await Promise.all([
-    posts.listPostsByStatus({ status: POST_STATUS.DRAFT, limit: query.limit, cursor: query.cursor }),
-    posts.listPostsByStatus({ status: POST_STATUS.PUBLISHED, limit: query.limit, cursor: query.cursor }),
+    posts.listPostsByStatus({ status: POST_STATUS.DRAFT, limit: query.limit }),
+    posts.listPostsByStatus({ status: POST_STATUS.PUBLISHED, limit: query.limit }),
   ]);
 
   return ok({ items: [...draft.items, ...published.items] });

@@ -127,7 +127,6 @@ export class BlogBackend extends Construct {
         [ENV_VARS.TABLE_NAME]: this.table.tableName,
         [ENV_VARS.GSI1_NAME]: GSI1_NAME,
         [ENV_VARS.COMMENTS_ENABLED]: String(enableComments),
-        [ENV_VARS.REQUIRE_AUTH_FOR_COMMENTS]: String(requireAuthForComments),
         [ENV_VARS.PRESIGN_EXPIRY_SECONDS]: String(presignExpiry.toSeconds()),
         ...(this.bucket ? { [ENV_VARS.ASSETS_BUCKET_NAME]: this.bucket.bucketName } : {}),
       },

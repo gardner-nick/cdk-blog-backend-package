@@ -56,7 +56,9 @@ being folded into the public routes.
 
 List and comment endpoints return `{ items, nextCursor }`; single-resource
 endpoints (get/create/update a post, create a comment, presign) return the
-resource bare. Errors are `{ error: string, message: string }`
+resource bare. Post list items are summaries — every post field except
+`content`; fetch `GET /posts/{slug}` for the full body. Errors are
+`{ error: string, message: string }`
 (`{ error: "validation_error", issues: [...] }` for validation failures).
 
 ## Auth
@@ -102,8 +104,9 @@ Notes if you bring your own table:
 - `PK`/`SK` and `GSI1PK`/`GSI1SK` must all be string attributes.
 - The GSI must be named to match `BlogBackend.GSI1_NAME` (`"GSI1"`) — or
   wire your table so its GSI is discoverable under that name — and must
-  project `ALL` attributes; list views read denormalized fields
-  (`title`, `excerpt`, `publishedAt`) straight off tag items.
+  project `ALL` attributes; tag-filtered list views read denormalized
+  summary fields (`title`, `excerpt`, `tags`, `createdAt`, `updatedAt`,
+  `publishedAt`) straight off tag items.
 - Tag items exist **only while the post is published**; they're written or
   removed transactionally alongside the post's `META` item on create/update,
   so tag listings never need a draft filter.
@@ -120,9 +123,10 @@ last page. Don't construct or decode cursors yourself; the shape is not a
 public contract and may change.
 
 `GET /admin/posts` without `?status=` queries the draft and published
-partitions separately and concatenates the results — pagination in that
-combined view isn't coherent across both partitions. Pass `?status=draft`
-or `?status=published` if you need to page through a large admin list.
+partitions separately and concatenates the results. That combined view is
+not paginated — passing `?cursor=` without `?status=` is rejected with a
+400 — so pass `?status=draft` or `?status=published` to page through a
+large admin list.
 
 ## Assets (optional)
 

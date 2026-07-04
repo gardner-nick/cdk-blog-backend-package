@@ -1,5 +1,5 @@
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import * as postRoutes from '../../handler/src/routes/posts';
 import { HttpError } from '../../handler/src/http';
 import { buildEvent } from './events';
@@ -62,5 +62,43 @@ describe('createPost route validation', () => {
     });
 
     await expect(postRoutes.createPost(event)).rejects.toMatchObject({ name: 'ZodError' });
+  });
+
+  it('dedupes duplicate tags so the transaction writes one tag item per tag', async () => {
+    ddbMock.on(TransactWriteCommand).resolves({});
+
+    await postRoutes.createPost(
+      buildEvent({
+        routeKey: 'POST /posts',
+        body: JSON.stringify({
+          title: 'Hello',
+          slug: 'hello',
+          content: 'Body',
+          status: 'published',
+          tags: ['x', 'x', 'y'],
+        }),
+      })
+    );
+
+    const call = ddbMock.commandCalls(TransactWriteCommand)[0];
+    const items = call.args[0].input.TransactItems ?? [];
+    // META + TAG#x + TAG#y, not a duplicate TAG#x put (which DynamoDB rejects).
+    expect(items).toHaveLength(3);
+    const meta = items.find((i) => i.Put?.Item?.SK === 'META');
+    expect(meta?.Put?.Item?.tags).toEqual(['x', 'y']);
+  });
+});
+
+describe('listAdminPosts combined view', () => {
+  it('rejects a cursor when no status filter is given', async () => {
+    const event = buildEvent({
+      routeKey: 'GET /admin/posts',
+      queryStringParameters: { cursor: 'abc' },
+    });
+
+    await expect(postRoutes.listAdminPosts(event)).rejects.toMatchObject({
+      status: 400,
+      code: 'invalid_cursor',
+    } satisfies Partial<HttpError>);
   });
 });

@@ -3,6 +3,7 @@ import {
   TransactionCanceledException,
 } from '@aws-sdk/client-dynamodb';
 import {
+  BatchWriteCommand,
   GetCommand,
   QueryCommand,
   TransactWriteCommand,
@@ -11,20 +12,25 @@ import {
 import { docClient } from './client';
 import { config } from '../config';
 import { HttpError } from '../http';
-import { encodeCursor, decodeCursor } from '../cursor';
+import { encodeCursor, decodeCursor, queryWithCursorGuard } from '../cursor';
 import { KEY_PREFIX, POST_STATUS, PostStatus } from '../../../src/constants';
 import type { CreatePostInput, UpdatePostInput } from '../validation';
 
-export interface Post {
+// What list endpoints return: everything but the body. The full Post (with
+// content) comes from the single-item routes via getPost.
+export interface PostSummary {
   slug: string;
   title: string;
   excerpt?: string;
-  content: string;
   status: PostStatus;
   tags: string[];
   createdAt: string;
   updatedAt: string;
   publishedAt?: string;
+}
+
+export interface Post extends PostSummary {
+  content: string;
 }
 
 interface PostItem {
@@ -44,6 +50,8 @@ interface PostItem {
   publishedAt?: string;
 }
 
+// Denormalizes every PostSummary field off the META item so tag listings can
+// be served truthfully from the tag item alone (no follow-up read).
 interface TagItem {
   PK: string;
   SK: string;
@@ -54,6 +62,9 @@ interface TagItem {
   tag: string;
   title: string;
   excerpt?: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
   publishedAt: string;
 }
 
@@ -81,6 +92,11 @@ function toPost(item: PostItem): Post {
     updatedAt: item.updatedAt,
     publishedAt: item.publishedAt,
   };
+}
+
+function toSummary(item: PostItem): PostSummary {
+  const { content: _content, ...summary } = toPost(item);
+  return summary;
 }
 
 function slugify(title: string): string {
@@ -131,8 +147,27 @@ function buildTagItem(post: PostItem, tag: string): TagItem {
     tag,
     title: post.title,
     excerpt: post.excerpt,
+    tags: post.tags,
+    createdAt: post.createdAt,
+    updatedAt: post.updatedAt,
     publishedAt: post.publishedAt as string,
   };
+}
+
+// DynamoDB caps TransactWriteItems at 100 operations, and a full 50-tag swap
+// on a published post needs 101 (META put + 50 tag puts + 50 tag deletes).
+// The META put (with its ConditionExpression) always sits in the first chunk,
+// so the slug-conflict/not-found checks still gate the whole write.
+const MAX_TRANSACT_ITEMS = 100;
+
+async function sendTransactWrite(
+  items: NonNullable<TransactWriteCommandInput['TransactItems']>
+): Promise<void> {
+  for (let i = 0; i < items.length; i += MAX_TRANSACT_ITEMS) {
+    await docClient.send(
+      new TransactWriteCommand({ TransactItems: items.slice(i, i + MAX_TRANSACT_ITEMS) })
+    );
+  }
 }
 
 export async function getPost(slug: string): Promise<Post | undefined> {
@@ -187,7 +222,7 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
   }
 
   try {
-    await docClient.send(new TransactWriteCommand({ TransactItems: transactItems }));
+    await sendTransactWrite(transactItems);
   } catch (err) {
     if (isConditionalCheckFailure(err)) {
       throw new HttpError(409, 'slug_conflict', `A post with slug "${slug}" already exists.`);
@@ -257,7 +292,7 @@ export async function updatePost(slug: string, input: UpdatePostInput): Promise<
   }
 
   try {
-    await docClient.send(new TransactWriteCommand({ TransactItems: transactItems }));
+    await sendTransactWrite(transactItems);
   } catch (err) {
     if (isConditionalCheckFailure(err)) {
       throw new HttpError(404, 'not_found', `No post found with slug "${slug}".`);
@@ -278,6 +313,7 @@ export async function deletePost(slug: string): Promise<void> {
       new QueryCommand({
         TableName: config.tableName,
         KeyConditionExpression: 'PK = :pk',
+        ProjectionExpression: 'PK, SK',
         ExpressionAttributeValues: { ':pk': pk },
         ExclusiveStartKey: exclusiveStartKey,
       })
@@ -294,19 +330,20 @@ export async function deletePost(slug: string): Promise<void> {
 
   const BATCH_SIZE = 25;
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
-    const batch = items.slice(i, i + BATCH_SIZE);
-    await docClient.send(
-      new TransactWriteCommand({
-        TransactItems: batch.map((key) => ({
-          Delete: { TableName: config.tableName, Key: key },
-        })),
-      })
-    );
+    let requests = items
+      .slice(i, i + BATCH_SIZE)
+      .map((key) => ({ DeleteRequest: { Key: key } }));
+    while (requests.length > 0) {
+      const result = await docClient.send(
+        new BatchWriteCommand({ RequestItems: { [config.tableName]: requests } })
+      );
+      requests = (result.UnprocessedItems?.[config.tableName] ?? []) as typeof requests;
+    }
   }
 }
 
 export interface ListPostsResult {
-  items: Post[];
+  items: PostSummary[];
   nextCursor?: string;
 }
 
@@ -315,20 +352,22 @@ export async function listPostsByStatus(params: {
   limit: number;
   cursor?: string;
 }): Promise<ListPostsResult> {
-  const result = await docClient.send(
-    new QueryCommand({
-      TableName: config.tableName,
-      IndexName: config.gsi1Name,
-      KeyConditionExpression: 'GSI1PK = :pk',
-      ExpressionAttributeValues: { ':pk': `${KEY_PREFIX.POSTS_STATUS}${params.status}` },
-      ScanIndexForward: false,
-      Limit: params.limit,
-      ExclusiveStartKey: params.cursor ? decodeCursor(params.cursor) : undefined,
-    })
+  const result = await queryWithCursorGuard(params.cursor, () =>
+    docClient.send(
+      new QueryCommand({
+        TableName: config.tableName,
+        IndexName: config.gsi1Name,
+        KeyConditionExpression: 'GSI1PK = :pk',
+        ExpressionAttributeValues: { ':pk': `${KEY_PREFIX.POSTS_STATUS}${params.status}` },
+        ScanIndexForward: false,
+        Limit: params.limit,
+        ExclusiveStartKey: params.cursor ? decodeCursor(params.cursor) : undefined,
+      })
+    )
   );
 
   return {
-    items: (result.Items ?? []).map((item) => toPost(item as PostItem)),
+    items: (result.Items ?? []).map((item) => toSummary(item as PostItem)),
     nextCursor: encodeCursor(result.LastEvaluatedKey),
   };
 }
@@ -338,16 +377,18 @@ export async function listPostsByTag(params: {
   limit: number;
   cursor?: string;
 }): Promise<ListPostsResult> {
-  const result = await docClient.send(
-    new QueryCommand({
-      TableName: config.tableName,
-      IndexName: config.gsi1Name,
-      KeyConditionExpression: 'GSI1PK = :pk',
-      ExpressionAttributeValues: { ':pk': `${KEY_PREFIX.TAG}${params.tag}` },
-      ScanIndexForward: false,
-      Limit: params.limit,
-      ExclusiveStartKey: params.cursor ? decodeCursor(params.cursor) : undefined,
-    })
+  const result = await queryWithCursorGuard(params.cursor, () =>
+    docClient.send(
+      new QueryCommand({
+        TableName: config.tableName,
+        IndexName: config.gsi1Name,
+        KeyConditionExpression: 'GSI1PK = :pk',
+        ExpressionAttributeValues: { ':pk': `${KEY_PREFIX.TAG}${params.tag}` },
+        ScanIndexForward: false,
+        Limit: params.limit,
+        ExclusiveStartKey: params.cursor ? decodeCursor(params.cursor) : undefined,
+      })
+    )
   );
 
   return {
@@ -357,11 +398,10 @@ export async function listPostsByTag(params: {
         slug: tagItem.slug,
         title: tagItem.title,
         excerpt: tagItem.excerpt,
-        content: '',
         status: POST_STATUS.PUBLISHED,
-        tags: [tagItem.tag],
-        createdAt: tagItem.publishedAt,
-        updatedAt: tagItem.publishedAt,
+        tags: tagItem.tags,
+        createdAt: tagItem.createdAt,
+        updatedAt: tagItem.updatedAt,
         publishedAt: tagItem.publishedAt,
       };
     }),

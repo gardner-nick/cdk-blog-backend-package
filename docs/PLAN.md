@@ -55,7 +55,7 @@ Key scripts: `build:handler` (esbuild bundle → `dist/handler/`), `build:lib` (
 
 - Get by slug: `GetItem`. Create: `ConditionExpression attribute_not_exists(PK)` → 409 on slug conflict.
 - List: Query GSI1 `POSTS#published` descending; `sortDate` = publishedAt (published) / createdAt (drafts under `POSTS#draft`). Cursor = base64url(LastEvaluatedKey), validated on decode.
-- Tags: one item per post-tag pair, **existing only while post is published** (tag queries are draft-safe with no filters). Create/update computes tag diff and writes META + tag items in one `TransactWriteItems`. Tag items denormalize list-view fields (title, excerpt, publishedAt) so tag listing needs no follow-up reads.
+- Tags: one item per post-tag pair, **existing only while post is published** (tag queries are draft-safe with no filters). Create/update computes tag diff and writes META + tag items via `TransactWriteItems` (chunked at DynamoDB's 100-op cap; the conditional META put leads the first chunk). Tag items denormalize the post-summary fields (title, excerpt, tags, createdAt, updatedAt, publishedAt) so tag listing needs no follow-up reads. List endpoints return summaries (no `content`).
 - Comments: Query `begins_with(SK, 'COMMENT#')`, paginated. Post delete removes the whole partition (Query + BatchWrite; fine at blog scale).
 
 ## Routes

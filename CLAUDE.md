@@ -38,7 +38,7 @@ npm pack --dry-run                    # packaging check: only dist/ + README/LIC
 ### Data model invariants (single table, GSI1)
 
 - Post META: `PK=POST#<slug>, SK=META`, listed via `GSI1PK=POSTS#<status>`. Create uses `ConditionExpression attribute_not_exists(PK)` → 409 on slug conflict.
-- Tag items (`SK=TAG#<tag>`, `GSI1PK=TAG#<tag>`) **exist only while the post is published**, so tag queries need no draft filters. They denormalize list-view fields (title, excerpt, publishedAt). Create/update computes the tag diff and writes META + tag items in one `TransactWriteItems`.
+- Tag items (`SK=TAG#<tag>`, `GSI1PK=TAG#<tag>`) **exist only while the post is published**, so tag queries need no draft filters. They denormalize the post-summary fields (title, excerpt, tags, createdAt, updatedAt, publishedAt); list endpoints return summaries without `content`. Create/update computes the tag diff and writes META + tag items via `TransactWriteItems`, chunked at the 100-op cap with the conditional META put leading the first chunk.
 - Comments: `SK=COMMENT#<createdAt>#<id>`, queried with `begins_with`. Post delete removes the whole partition (Query + BatchWrite).
 - Pagination cursor = base64url(LastEvaluatedKey), key shape validated on decode (`handler/src/cursor.ts`).
 

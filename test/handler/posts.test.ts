@@ -3,7 +3,13 @@ import {
   ConditionalCheckFailedException,
   TransactionCanceledException,
 } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  BatchWriteCommand,
+  DynamoDBDocumentClient,
+  GetCommand,
+  QueryCommand,
+  TransactWriteCommand,
+} from '@aws-sdk/lib-dynamodb';
 import * as posts from '../../handler/src/db/posts';
 import { HttpError } from '../../handler/src/http';
 
@@ -198,6 +204,29 @@ describe('updatePost tag-diff transitions', () => {
       status: 404,
     } satisfies Partial<HttpError>);
   });
+
+  it('chunks transactions above the 100-item TransactWriteItems cap', async () => {
+    const oldTags = Array.from({ length: 50 }, (_, i) => `old-${i}`);
+    const newTags = Array.from({ length: 50 }, (_, i) => `new-${i}`);
+    ddbMock.on(GetCommand).resolves({
+      Item: existingPostItem({
+        status: 'published',
+        tags: oldTags,
+        publishedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    });
+    ddbMock.on(TransactWriteCommand).resolves({});
+
+    // 1 META put + 50 tag puts + 50 tag deletes = 101 items -> two transactions.
+    await posts.updatePost('hello', { tags: newTags });
+
+    const calls = ddbMock.commandCalls(TransactWriteCommand);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].args[0].input.TransactItems).toHaveLength(100);
+    expect(calls[1].args[0].input.TransactItems).toHaveLength(1);
+    // The conditional META put must lead the first chunk so 404s still gate the write.
+    expect(calls[0].args[0].input.TransactItems?.[0].Put?.Item?.SK).toBe('META');
+  });
 });
 
 describe('listPostsByStatus', () => {
@@ -223,6 +252,68 @@ describe('listPostsByStatus', () => {
     const decoded = JSON.parse(Buffer.from(result.nextCursor as string, 'base64url').toString('utf8'));
     expect(decoded).toEqual(lastKey);
   });
+
+  it('returns summaries without the content field', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [existingPostItem({ status: 'published', publishedAt: '2026-01-01T00:00:00.000Z' })],
+    });
+
+    const result = await posts.listPostsByStatus({ status: 'published', limit: 10 });
+    expect(result.items[0].slug).toBe('hello');
+    expect(result.items[0]).not.toHaveProperty('content');
+  });
+
+  it('maps a wrong-partition cursor rejection to a 400 invalid_cursor', async () => {
+    const foreignCursor = Buffer.from(
+      JSON.stringify({ PK: 'POST#x', SK: 'TAG#y', GSI1PK: 'TAG#y', GSI1SK: '2026-01-01#x' }),
+      'utf8'
+    ).toString('base64url');
+    ddbMock
+      .on(QueryCommand)
+      .rejects(Object.assign(new Error('The provided starting key is invalid'), {
+        name: 'ValidationException',
+      }));
+
+    await expect(
+      posts.listPostsByStatus({ status: 'published', limit: 10, cursor: foreignCursor })
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_cursor' } satisfies Partial<HttpError>);
+  });
+});
+
+describe('listPostsByTag', () => {
+  it('returns the denormalized summary fields off the tag item', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        {
+          PK: 'POST#hello',
+          SK: 'TAG#a',
+          GSI1PK: 'TAG#a',
+          GSI1SK: '2026-01-02T00:00:00.000Z#hello',
+          entityType: 'TAG',
+          slug: 'hello',
+          tag: 'a',
+          title: 'Hello',
+          excerpt: 'Hi',
+          tags: ['a', 'b'],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-03T00:00:00.000Z',
+          publishedAt: '2026-01-02T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const result = await posts.listPostsByTag({ tag: 'a', limit: 10 });
+    expect(result.items[0]).toEqual({
+      slug: 'hello',
+      title: 'Hello',
+      excerpt: 'Hi',
+      status: 'published',
+      tags: ['a', 'b'],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+      publishedAt: '2026-01-02T00:00:00.000Z',
+    });
+  });
 });
 
 describe('deletePost', () => {
@@ -233,7 +324,7 @@ describe('deletePost', () => {
     } satisfies Partial<HttpError>);
   });
 
-  it('deletes every item found in the partition', async () => {
+  it('batch-deletes every item found in the partition, retrying unprocessed keys', async () => {
     ddbMock.on(QueryCommand).resolves({
       Items: [
         { PK: 'POST#hello', SK: 'META' },
@@ -241,13 +332,30 @@ describe('deletePost', () => {
         { PK: 'POST#hello', SK: 'COMMENT#2026-01-01#1' },
       ],
     });
-    ddbMock.on(TransactWriteCommand).resolves({});
+    const unprocessed = { DeleteRequest: { Key: { PK: 'POST#hello', SK: 'TAG#a' } } };
+    ddbMock
+      .on(BatchWriteCommand)
+      .resolvesOnce({ UnprocessedItems: { 'test-table': [unprocessed] } })
+      .resolves({});
 
     await posts.deletePost('hello');
 
-    const call = ddbMock.commandCalls(TransactWriteCommand)[0];
-    const items = call.args[0].input.TransactItems ?? [];
-    expect(items).toHaveLength(3);
-    expect(items.every((i) => i.Delete)).toBe(true);
+    const calls = ddbMock.commandCalls(BatchWriteCommand);
+    expect(calls).toHaveLength(2);
+    const firstRequests = calls[0].args[0].input.RequestItems?.['test-table'] ?? [];
+    expect(firstRequests).toHaveLength(3);
+    expect(firstRequests.every((r) => r.DeleteRequest)).toBe(true);
+    // Only the unprocessed key is retried.
+    expect(calls[1].args[0].input.RequestItems?.['test-table']).toEqual([unprocessed]);
+  });
+
+  it('requests only the key attributes when scanning the partition', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ PK: 'POST#hello', SK: 'META' }] });
+    ddbMock.on(BatchWriteCommand).resolves({});
+
+    await posts.deletePost('hello');
+
+    const query = ddbMock.commandCalls(QueryCommand)[0];
+    expect(query.args[0].input.ProjectionExpression).toBe('PK, SK');
   });
 });

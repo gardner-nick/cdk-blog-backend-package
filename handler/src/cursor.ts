@@ -46,3 +46,21 @@ export function decodeCursor(cursor: string): Cursor {
 
   return record as unknown as Cursor;
 }
+
+// A structurally valid cursor can still name the wrong partition (e.g. a
+// nextCursor from GET /posts?tag=x replayed against GET /posts). DynamoDB
+// rejects such an ExclusiveStartKey with a ValidationException; when the key
+// came from a client cursor that's a bad request, not a server error.
+export async function queryWithCursorGuard<T>(
+  cursor: string | undefined,
+  run: () => Promise<T>
+): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (cursor && err instanceof Error && err.name === 'ValidationException') {
+      throw new HttpError(400, 'invalid_cursor', 'Cursor is not valid.');
+    }
+    throw err;
+  }
+}
