@@ -1,12 +1,21 @@
 {
-  "name": "cdk-blog-backend",
+  "name": "@gardner-nick/cdk-blog-backend",
   "version": "0.1.0",
   "description": "A reusable AWS CDK construct for a serverless blog backend (API Gateway HTTP API + Lambda + DynamoDB, optional S3 assets).",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gardner-nick/cdk-blog-backend-package.git"
+  },
+  "license": "MIT",
+  "author": "Nick Gardner",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "npm run build:handler && npm run build:lib",
     "build:handler": "node esbuild.config.js",
@@ -23,7 +32,6 @@
     "serverless",
     "construct"
   ],
-  "license": "MIT",
   "peerDependencies": {
     "aws-cdk-lib": "^2.150.0",
     "constructs": "^10.0.0"

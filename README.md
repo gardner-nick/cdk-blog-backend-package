@@ -7,7 +7,7 @@ uploads via presigned URLs.
 
 ```ts
 import { App, Stack } from 'aws-cdk-lib';
-import { BlogBackend } from 'cdk-blog-backend';
+import { BlogBackend } from '@gardner-nick/cdk-blog-backend';
 
 const app = new App();
 const stack = new Stack(app, 'MyBlogStack');
@@ -25,7 +25,7 @@ construct instance and export what you need from your own stack.
 ## Install
 
 ```sh
-npm install cdk-blog-backend aws-cdk-lib constructs
+npm install @gardner-nick/cdk-blog-backend aws-cdk-lib constructs
 ```
 
 `aws-cdk-lib` and `constructs` are peer dependencies — this package ships
