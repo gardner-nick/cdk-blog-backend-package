@@ -81,6 +81,12 @@ describe('BlogBackend defaults', () => {
     expect(Object.keys(routes)).toHaveLength(0);
   });
 
+  it('runs the handler on the nodejs24.x runtime', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Runtime: 'nodejs24.x',
+    });
+  });
+
   it('sets the expected env vars on the handler', () => {
     template.hasResourceProperties('AWS::Lambda::Function', {
       Environment: {

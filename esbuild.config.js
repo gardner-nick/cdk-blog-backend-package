@@ -5,10 +5,10 @@ esbuild
     entryPoints: ['handler/src/index.ts'],
     bundle: true,
     platform: 'node',
-    target: 'node20',
+    target: 'node24',
     outfile: 'dist/handler/index.js',
     // Only the base @aws-sdk/client-* packages are confirmed present in the
-    // Node 20 Lambda runtime's preinstalled AWS SDK v3. Utility/wrapper
+    // Node 24 Lambda runtime's preinstalled AWS SDK v3. Utility/wrapper
     // packages (lib-dynamodb, s3-request-presigner) are NOT part of that
     // bundle and must be bundled here, or they break at cold start with
     // MODULE_NOT_FOUND.

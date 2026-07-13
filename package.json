@@ -1,6 +1,6 @@
 {
   "name": "@gardner-nick/cdk-blog-backend",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A reusable AWS CDK construct for a serverless blog backend (API Gateway HTTP API + Lambda + DynamoDB, optional S3 assets).",
   "repository": {
     "type": "git",
@@ -33,7 +33,7 @@
     "construct"
   ],
   "peerDependencies": {
-    "aws-cdk-lib": "^2.156.0",
+    "aws-cdk-lib": "^2.224.0",
     "constructs": "^10.0.0"
   },
   "devDependencies": {
@@ -43,8 +43,8 @@
     "@aws-sdk/s3-request-presigner": "^3.600.0",
     "@types/aws-lambda": "^8.10.138",
     "@types/jest": "^29.5.12",
-    "@types/node": "^20.14.0",
-    "aws-cdk-lib": "^2.156.0",
+    "@types/node": "^24.0.0",
+    "aws-cdk-lib": "^2.224.0",
     "aws-sdk-client-mock": "^4.0.1",
     "constructs": "^10.3.0",
     "esbuild": "^0.23.0",
@@ -54,6 +54,6 @@
     "zod": "^3.23.8"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   }
 }

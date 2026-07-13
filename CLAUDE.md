@@ -26,7 +26,7 @@ npm pack --dry-run                    # packaging check: only dist/ + README/LIC
 ### Two compilation units, one shared contract
 
 - `src/` — the construct (`blog-backend.ts`), compiled by tsc with declarations to `dist/`.
-- `handler/src/` — the Lambda code, **pre-bundled by esbuild at package build time** into `dist/handler/index.js`. AWS SDK v3 is marked `--external` (provided by the Node 20 runtime); zod is bundled in. Result: the published package has **zero runtime `dependencies`** — only `aws-cdk-lib`/`constructs` peers. Keep it that way; anything the handler needs at runtime must be bundled or runtime-provided.
+- `handler/src/` — the Lambda code, **pre-bundled by esbuild at package build time** into `dist/handler/index.js`. AWS SDK v3 is marked `--external` (provided by the Node 24 runtime); zod is bundled in. Result: the published package has **zero runtime `dependencies`** — only `aws-cdk-lib`/`constructs` peers. Keep it that way; anything the handler needs at runtime must be bundled or runtime-provided.
 - The construct loads the bundle via `Code.fromAsset(path.join(__dirname, '..', 'dist', 'handler'))`, so it works from node_modules and from local tests; consumers never need esbuild.
 - `src/constants.ts` holds the names shared between construct and handler (GSI name, env var names, key prefixes). Both sides import from it — never duplicate these strings.
 
