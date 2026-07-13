@@ -28,8 +28,10 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 
-      # Trusted Publishing (OIDC) requires npm >= 11.5.1; the runtime ships npm 10.x.
-      - run: npm install -g npm@latest
+      # Trusted Publishing (OIDC) requires npm >= 11.5.1, and Node 24 may ship an
+      # older 11.x. Pinned to ^11.5.1 rather than @latest: @latest floats into the
+      # next major, whose engine range can drop the Node we run on.
+      - run: npm install -g npm@^11.5.1
 
       - name: Check if version is already published
         id: check
