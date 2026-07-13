@@ -83,22 +83,32 @@ interface BlogBackendProps {
   requireAuthForComments?: boolean;   // default false
   enableAssets?: boolean;             // default false
   assetsBucket?: s3.IBucket;          // BYO (implies enableAssets)
+  assetsCdn?: AssetsCdnProps;         // CloudFront read path (implies enableAssets)
   presignExpiry?: Duration;           // default 15 min
   corsPreflight?: apigwv2.CorsPreflightOptions;
   apiName?: string;
   memorySize?: number; timeout?: Duration; logRetention?: logs.RetentionDays;
+}
+interface AssetsCdnProps {
+  distribution?: cloudfront.Distribution;  // BYO: gets an `<prefix>/*` behavior via OAC
+  domainName?: string;                     // URL-building only (imported/external CDN), or CNAME override
+  pathPrefix?: string;                     // default 'assets'; key prefix + behavior path pattern
 }
 class BlogBackend extends Construct {
   readonly api: apigwv2.HttpApi;
   readonly table: dynamodb.ITable;
   readonly handler: lambda.Function;
   readonly bucket?: s3.IBucket;
+  readonly distribution?: cloudfront.IDistribution;  // created or passed in
+  readonly assetsBaseUrl?: string;                   // https://<domain> when a CDN is configured
   readonly apiUrl: string;
   static readonly GSI1_NAME = 'GSI1';  // for BYO-table users
 }
 ```
 
-Wiring: create table unless provided; Function with env vars (`TABLE_NAME`, `GSI1_NAME`, `ASSETS_BUCKET_NAME`, `COMMENTS_ENABLED`, `PRESIGN_EXPIRY_SECONDS`); `table.grantReadWriteData(handler)`; `bucket.grantPut(handler)`; one `HttpLambdaIntegration` shared across `addRoutes` calls, authorizer attached per route table above. No CfnOutputs (library).
+Wiring: create table unless provided; Function with env vars (`TABLE_NAME`, `GSI1_NAME`, `ASSETS_BUCKET_NAME`, `ASSETS_KEY_PREFIX`, `ASSETS_PUBLIC_BASE_URL`, `COMMENTS_ENABLED`, `PRESIGN_EXPIRY_SECONDS`); `table.grantReadWriteData(handler)`; `bucket.grantPut(handler)`; one `HttpLambdaIntegration` shared across `addRoutes` calls, authorizer attached per route table above. No CfnOutputs (library).
+
+Assets read path: uploads always go direct to S3 via the presigned PUT; reads are served through CloudFront (`assetsCdn`), bucket stays private via Origin Access Control. When `assetsCdn` is set, keys are prefixed `<pathPrefix>/` (default `assets/`) so the same key works under a created distribution (default behavior) and a BYO distribution behavior (`<prefix>/*` — CloudFront forwards the full path as the S3 key); without it keys stay unprefixed, so existing asset users see no change. `fileName` is validated to contain no path separators or dot segments, which is what makes the prefix an actual boundary. Presign response gains `publicUrl` when a CDN/domain is configured.
 
 ## Handler design
 
@@ -108,7 +118,7 @@ Wiring: create table unless provided; Function with env vars (`TABLE_NAME`, `GSI
 
 ## Testing
 
-- **Construct** (`Template.fromStack`): table key/GSI schema; no table when BYO; route `AuthorizationType` NONE vs AWS_IAM per route; conditional comment/asset routes per flags; env vars; IAM grants; removal policy propagation.
+- **Construct** (`Template.fromStack`): table key/GSI schema; no table when BYO; route `AuthorizationType` NONE vs AWS_IAM per route; conditional comment/asset routes per flags; env vars; IAM grants; removal policy propagation; assetsCdn modes (created distribution + OAC + bucket policy; BYO distribution gets a `<prefix>/*` behavior; domainName-only creates nothing; pathPrefix validation).
 - **Handler** (`aws-sdk-client-mock` on `DynamoDBDocumentClient`): router dispatch + 404; list Query inputs + cursor round-trip + limit clamp; create → 409 on ConditionalCheckFailed; tag-item transaction contents (only when published); draft 404 on public get; comments SK format + disabled flag; presign via jest module mock of `getSignedUrl`; validation → 400 envelope.
 
 ## Implementation order

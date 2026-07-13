@@ -60,7 +60,14 @@ export const createCommentSchema = z.object({
 export type CreateCommentInput = z.infer<typeof createCommentSchema>;
 
 export const presignUploadSchema = z.object({
-  fileName: z.string().min(1).max(500),
+  // Slashes and dot segments would let the key escape the configured prefix,
+  // which the CloudFront behavior's path pattern relies on.
+  fileName: z
+    .string()
+    .min(1)
+    .max(500)
+    .regex(/^[^/\\]+$/, 'fileName must not contain path separators')
+    .refine((name) => name !== '.' && name !== '..', 'fileName must not be a dot segment'),
   contentType: z.string().min(1).max(200),
 });
 

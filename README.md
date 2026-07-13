@@ -130,8 +130,9 @@ large admin list.
 
 ## Assets (optional)
 
-Set `enableAssets: true` (or pass your own `assetsBucket`) to get a private
-S3 bucket and a `POST /assets/presign-upload` route:
+Set `enableAssets: true` (or pass your own `assetsBucket`, or configure
+`assetsCdn`) to get a private S3 bucket and a `POST /assets/presign-upload`
+route:
 
 ```ts
 const blog = new BlogBackend(stack, 'Blog', { enableAssets: true });
@@ -141,12 +142,85 @@ const blog = new BlogBackend(stack, 'Blog', { enableAssets: true });
 POST /assets/presign-upload
 { "fileName": "cover.png", "contentType": "image/png" }
 
--> { "uploadUrl": "https://...", "key": "...", "expiresInSeconds": 900 }
+-> {
+     "uploadUrl": "https://...",
+     "key": "<uuid>-cover.png",
+     "expiresInSeconds": 900,
+     "publicUrl": "https://<cdn-domain>/assets/<uuid>-cover.png"  // when assetsCdn is set
+   }
 ```
 
 `PUT` your file bytes directly to `uploadUrl` with a matching
 `Content-Type` header. `presignExpiry` controls how long the URL is valid
-(default 15 minutes).
+(default 15 minutes). `fileName` must not contain path separators (`/`, `\`)
+or be a dot segment — it's interpolated into the S3 key.
+
+Without `assetsCdn`, keys are unprefixed (`<uuid>-cover.png`). Configuring
+`assetsCdn` moves them under a prefix (default `assets/`, configurable via
+`assetsCdn.pathPrefix`) so they line up with the CloudFront behavior.
+
+Without `assetsCdn` the bucket is write-only — it's fully private and the
+construct grants the Lambda `PutObject` only — so configure a CDN (below)
+or wire your own read path if uploaded files need to be served.
+
+## Serving assets via CloudFront
+
+Uploads always go straight to S3 via the presigned URL; **reads** are served
+through CloudFront with the bucket staying fully private (Origin Access
+Control). Three modes:
+
+**1. Create a distribution for me** — pass an empty object (implies
+`enableAssets`):
+
+```ts
+const blog = new BlogBackend(stack, 'Blog', { assetsCdn: {} });
+// blog.distribution  — the created cloudfront.Distribution
+// blog.assetsBaseUrl — "https://dxxxx.cloudfront.net"
+```
+
+**2. Use my existing distribution** — the construct adds an
+`assets/*` behavior pointing at the bucket via OAC. Must be the concrete
+`cloudfront.Distribution` class (imported `IDistribution`s can't be
+modified):
+
+```ts
+const blog = new BlogBackend(stack, 'Blog', {
+  assetsCdn: {
+    distribution: myDistribution,
+    // domainName: 'cdn.example.com',  // optional: custom CNAME for publicUrl
+  },
+});
+```
+
+Because CloudFront forwards the full request path to the origin, the
+behavior's path pattern and the S3 key prefix must match — both default to
+`assets` and both follow `assetsCdn.pathPrefix` if you change it.
+
+**3. I'll wire it myself** — pass only `domainName` (for a distribution
+imported from another stack, or a non-CloudFront CDN). The construct
+creates and modifies nothing; the domain is only used to build `publicUrl`:
+
+```ts
+const blog = new BlogBackend(stack, 'Blog', {
+  assetsCdn: { domainName: 'cdn.example.com' },
+});
+```
+
+Notes:
+
+- Asset behaviors get `REDIRECT_TO_HTTPS`, the `CACHING_OPTIMIZED` cache
+  policy, and the managed `CORS_ALLOW_ALL_ORIGINS` response headers policy
+  (browser `fetch`/canvas use works cross-origin).
+- **Imported buckets:** if you pass an imported `assetsBucket`
+  (`Bucket.fromBucketName` etc.), CDK cannot attach the OAC bucket policy
+  (`addToResourcePolicy` is a no-op with a synth warning) — add the
+  `cloudfront.amazonaws.com` + `AWS:SourceArn` statement to the bucket
+  policy yourself. (Same limitation as the construct's `grantPut`.)
+- Objects uploaded while `assetsCdn` was unset have unprefixed keys and won't
+  be matched by an `assets/*` behavior — a created distribution serves the
+  bucket root, so they stay reachable there, but a BYO-distribution behavior
+  won't route to them. Move them under the prefix, or serve them from
+  whatever read path you had before.
 
 ## Props
 
@@ -159,6 +233,7 @@ POST /assets/presign-upload
 | `requireAuthForComments` | `boolean` | `false` | Moves comment creation behind `writeAuthorizer`. |
 | `enableAssets` | `boolean` | `false` (`true` if `assetsBucket` is set) | Creates the assets bucket + presign route. |
 | `assetsBucket` | `s3.IBucket` | new bucket if `enableAssets` | BYO bucket; implies `enableAssets`. |
+| `assetsCdn` | `AssetsCdnProps` | none (assets are write-only) | CloudFront read path; implies `enableAssets`. See [Serving assets via CloudFront](#serving-assets-via-cloudfront). |
 | `presignExpiry` | `Duration` | 15 minutes | Presigned upload URL lifetime. |
 | `corsPreflight` | `apigwv2.CorsPreflightOptions` | none | Passed straight to the `HttpApi`. |
 | `apiName` | `string` | auto-generated | Passed straight to the `HttpApi`. |
@@ -174,5 +249,7 @@ POST /assets/presign-upload
 | `table` | `dynamodb.ITable` | The table in use (created or BYO). |
 | `handler` | `lambda.Function` | The router Lambda. |
 | `bucket` | `s3.IBucket \| undefined` | Set only when assets are enabled. |
+| `distribution` | `cloudfront.IDistribution \| undefined` | The distribution serving assets (created or passed in); unset in `domainName`-only mode. |
+| `assetsBaseUrl` | `string \| undefined` | `https://<domain>` for public asset reads, when a CDN is configured. |
 | `apiUrl` | `string` | `api.apiEndpoint`. |
 | `BlogBackend.GSI1_NAME` | `string` (static) | For BYO-table consumers wiring up their own GSI. |

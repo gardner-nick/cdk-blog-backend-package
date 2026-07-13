@@ -2,6 +2,8 @@ import { App, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import { HttpJwtAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { BlogBackend } from '../src';
 
@@ -146,8 +148,152 @@ describe('BlogBackend with enableAssets: true', () => {
       }),
     });
     template.hasResourceProperties('AWS::Lambda::Function', {
-      Environment: { Variables: Match.objectLike({ ASSETS_BUCKET_NAME: Match.anyValue() }) },
+      Environment: {
+        Variables: Match.objectLike({
+          ASSETS_BUCKET_NAME: Match.anyValue(),
+          ASSETS_KEY_PREFIX: Match.absent(),
+          ASSETS_PUBLIC_BASE_URL: Match.absent(),
+        }),
+      },
     });
+  });
+
+  it('does not create a distribution without assetsCdn', () => {
+    const { template, construct } = synth({ enableAssets: true });
+    template.resourceCountIs('AWS::CloudFront::Distribution', 0);
+    expect(construct.distribution).toBeUndefined();
+    expect(construct.assetsBaseUrl).toBeUndefined();
+  });
+});
+
+describe('BlogBackend with assetsCdn: {} (created distribution)', () => {
+  const { template, construct } = synth({ assetsCdn: {} });
+
+  it('implies enableAssets: creates the bucket and presign route', () => {
+    template.resourceCountIs('AWS::S3::Bucket', 1);
+    expect(routeAuth(template, 'POST /assets/presign-upload')).toBe('AWS_IAM');
+  });
+
+  it('creates a distribution with an origin access control', () => {
+    template.resourceCountIs('AWS::CloudFront::Distribution', 1);
+    template.resourceCountIs('AWS::CloudFront::OriginAccessControl', 1);
+  });
+
+  it('adds a bucket policy allowing CloudFront scoped to the distribution', () => {
+    template.hasResourceProperties('AWS::S3::BucketPolicy', {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: 's3:GetObject',
+            Principal: { Service: 'cloudfront.amazonaws.com' },
+            Condition: Match.objectLike({
+              StringEquals: Match.objectLike({ 'AWS:SourceArn': Match.anyValue() }),
+            }),
+          }),
+        ]),
+      }),
+    });
+  });
+
+  it('exposes the distribution and base URL, and passes them to the handler', () => {
+    expect(construct.distribution).toBeDefined();
+    expect(construct.assetsBaseUrl).toMatch(/^https:\/\//);
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({
+          ASSETS_PUBLIC_BASE_URL: Match.anyValue(),
+          ASSETS_KEY_PREFIX: 'assets',
+        }),
+      },
+    });
+  });
+
+  it('still never emits a CfnOutput', () => {
+    expect(template.toJSON().Outputs).toBeUndefined();
+  });
+});
+
+describe('BlogBackend with a BYO distribution', () => {
+  function synthWithDistribution(pathPrefix?: string) {
+    const app = new App();
+    const stack = new Stack(app, 'TestStack');
+    const distribution = new cloudfront.Distribution(stack, 'ExistingCdn', {
+      defaultBehavior: { origin: new origins.HttpOrigin('app.example.com') },
+    });
+    const construct = new BlogBackend(stack, 'Blog', {
+      assetsCdn: { distribution, ...(pathPrefix ? { pathPrefix } : {}) },
+    });
+    return { construct, distribution, template: Template.fromStack(stack) };
+  }
+
+  it('adds an assets/* behavior instead of creating a new distribution', () => {
+    const { template, construct, distribution } = synthWithDistribution();
+    template.resourceCountIs('AWS::CloudFront::Distribution', 1);
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        CacheBehaviors: Match.arrayWith([Match.objectLike({ PathPattern: 'assets/*' })]),
+      }),
+    });
+    template.resourceCountIs('AWS::CloudFront::OriginAccessControl', 1);
+    expect(construct.distribution).toBe(distribution);
+  });
+
+  it('uses domainName as a CNAME override for public URLs', () => {
+    const app = new App();
+    const stack = new Stack(app, 'TestStack');
+    const distribution = new cloudfront.Distribution(stack, 'ExistingCdn', {
+      defaultBehavior: { origin: new origins.HttpOrigin('app.example.com') },
+    });
+    const construct = new BlogBackend(stack, 'Blog', {
+      assetsCdn: { distribution, domainName: 'cdn.example.com' },
+    });
+
+    expect(construct.distribution).toBe(distribution);
+    expect(construct.assetsBaseUrl).toBe('https://cdn.example.com');
+  });
+
+  it('honors a custom pathPrefix in the behavior and env var', () => {
+    const { template } = synthWithDistribution('img');
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        CacheBehaviors: Match.arrayWith([Match.objectLike({ PathPattern: 'img/*' })]),
+      }),
+    });
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: { Variables: Match.objectLike({ ASSETS_KEY_PREFIX: 'img' }) },
+    });
+  });
+});
+
+describe('BlogBackend with assetsCdn.domainName only', () => {
+  it('creates no distribution and uses the domain for public URLs', () => {
+    const { template, construct } = synth({ assetsCdn: { domainName: 'cdn.example.com' } });
+    template.resourceCountIs('AWS::CloudFront::Distribution', 0);
+    expect(construct.distribution).toBeUndefined();
+    expect(construct.assetsBaseUrl).toBe('https://cdn.example.com');
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({ ASSETS_PUBLIC_BASE_URL: 'https://cdn.example.com' }),
+      },
+    });
+  });
+});
+
+describe('BlogBackend assetsCdn validation', () => {
+  it('rejects pathPrefixes with slashes, dot segments, or empty strings', () => {
+    expect(() => synth({ assetsCdn: { pathPrefix: 'a/b' } })).toThrow(/pathPrefix/);
+    expect(() => synth({ assetsCdn: { pathPrefix: '' } })).toThrow(/pathPrefix/);
+    expect(() => synth({ assetsCdn: { pathPrefix: '..' } })).toThrow(/pathPrefix/);
+    expect(() => synth({ assetsCdn: { pathPrefix: '.' } })).toThrow(/pathPrefix/);
+  });
+
+  it('rejects a domainName with a scheme or path', () => {
+    expect(() => synth({ assetsCdn: { domainName: 'https://cdn.example.com' } })).toThrow(
+      /bare hostname/
+    );
+    expect(() => synth({ assetsCdn: { domainName: 'cdn.example.com/assets' } })).toThrow(
+      /bare hostname/
+    );
   });
 });
 
