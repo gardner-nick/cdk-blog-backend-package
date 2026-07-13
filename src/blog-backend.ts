@@ -181,7 +181,7 @@ export class BlogBackend extends Construct {
     });
 
     this.handler = new lambda.Function(this, 'Handler', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_24_X,
       handler: 'index.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'dist', 'handler')),
       memorySize: props.memorySize ?? 256,

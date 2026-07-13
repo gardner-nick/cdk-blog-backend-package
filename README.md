@@ -32,6 +32,11 @@ npm install @gardner-nick/cdk-blog-backend aws-cdk-lib constructs
 with **zero runtime dependencies** of its own (the Lambda bundle is
 pre-built with esbuild at publish time).
 
+The handler runs on the `nodejs24.x` Lambda runtime, which requires
+**`aws-cdk-lib` >= 2.224.0** (the first release with `Runtime.NODEJS_24_X`).
+On an older `aws-cdk-lib` the construct won't compile — upgrade CDK, or stay
+on `@gardner-nick/cdk-blog-backend` 0.2.x, which targets `nodejs20.x`.
+
 ## Routes
 
 | Method & Path | Auth | Notes |

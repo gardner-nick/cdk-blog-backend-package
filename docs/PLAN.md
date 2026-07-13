@@ -13,7 +13,7 @@ Greenfield npm package. Goal: a TypeScript CDK construct library where a consume
 
 ## Architecture at a glance
 
-- Handler is **pre-bundled with esbuild at package build time** into `dist/handler/index.js`; the construct uses `lambda.Function` + `Code.fromAsset(path.join(__dirname, '..', 'dist', 'handler'))`. Works from node_modules and from local tests; consumers never need esbuild. AWS SDK v3 marked `--external` (provided by Node 20 runtime), zod bundled — so the published package has **zero runtime `dependencies`**, only `aws-cdk-lib`/`constructs` peers.
+- Handler is **pre-bundled with esbuild at package build time** into `dist/handler/index.js`; the construct uses `lambda.Function` + `Code.fromAsset(path.join(__dirname, '..', 'dist', 'handler'))`. Works from node_modules and from local tests; consumers never need esbuild. AWS SDK v3 marked `--external` (provided by Node 24 runtime), zod bundled — so the published package has **zero runtime `dependencies`**, only `aws-cdk-lib`/`constructs` peers.
 - HTTP API `routeKey` (e.g. `"GET /posts/{slug}"`) makes the router a plain `Record<string, RouteFn>` lookup — no routing lib.
 
 ## Package structure
