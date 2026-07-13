@@ -11,6 +11,8 @@ export interface PresignUploadResult {
   uploadUrl: string;
   key: string;
   expiresInSeconds: number;
+  /** Public read URL of the asset; present when a CDN is configured. */
+  publicUrl?: string;
 }
 
 export async function presignUpload(input: PresignUploadInput): Promise<PresignUploadResult> {
@@ -18,7 +20,7 @@ export async function presignUpload(input: PresignUploadInput): Promise<PresignU
     throw new HttpError(404, 'assets_disabled', 'Asset uploads are not enabled.');
   }
 
-  const key = `${randomUUID()}-${input.fileName}`;
+  const key = `${config.assetsKeyPrefix}/${randomUUID()}-${input.fileName}`;
   const command = new PutObjectCommand({
     Bucket: config.assetsBucketName,
     Key: key,
@@ -29,5 +31,16 @@ export async function presignUpload(input: PresignUploadInput): Promise<PresignU
     expiresIn: config.presignExpirySeconds,
   });
 
-  return { uploadUrl, key, expiresInSeconds: config.presignExpirySeconds };
+  // Per-segment encoding keeps the `/` separators while escaping anything
+  // URL-hostile the unrestricted fileName may contain.
+  const publicUrl = config.assetsPublicBaseUrl
+    ? `${config.assetsPublicBaseUrl}/${key.split('/').map(encodeURIComponent).join('/')}`
+    : undefined;
+
+  return {
+    uploadUrl,
+    key,
+    expiresInSeconds: config.presignExpirySeconds,
+    ...(publicUrl ? { publicUrl } : {}),
+  };
 }

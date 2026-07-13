@@ -1,1 +1,1 @@
-export { BlogBackend, BlogBackendProps } from './blog-backend';
+export { BlogBackend, BlogBackendProps, AssetsCdnProps } from './blog-backend';

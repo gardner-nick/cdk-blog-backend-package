@@ -1,4 +1,8 @@
-import { DEFAULT_PRESIGN_EXPIRY_SECONDS, ENV_VARS } from '../../src/constants';
+import {
+  DEFAULT_ASSETS_KEY_PREFIX,
+  DEFAULT_PRESIGN_EXPIRY_SECONDS,
+  ENV_VARS,
+} from '../../src/constants';
 
 function required(name: string): string {
   const value = process.env[name];
@@ -12,6 +16,8 @@ export const config = {
   tableName: required(ENV_VARS.TABLE_NAME),
   gsi1Name: required(ENV_VARS.GSI1_NAME),
   assetsBucketName: process.env[ENV_VARS.ASSETS_BUCKET_NAME],
+  assetsPublicBaseUrl: process.env[ENV_VARS.ASSETS_PUBLIC_BASE_URL],
+  assetsKeyPrefix: process.env[ENV_VARS.ASSETS_KEY_PREFIX] ?? DEFAULT_ASSETS_KEY_PREFIX,
   commentsEnabled: process.env[ENV_VARS.COMMENTS_ENABLED] !== 'false',
   presignExpirySeconds: process.env[ENV_VARS.PRESIGN_EXPIRY_SECONDS]
     ? Number(process.env[ENV_VARS.PRESIGN_EXPIRY_SECONDS])

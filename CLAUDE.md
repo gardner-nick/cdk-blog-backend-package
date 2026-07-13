@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-`cdk-blog-backend` — a TypeScript CDK construct library (plain tsc, no jsii/projen). A consumer writes `new BlogBackend(this, 'Blog', {...})` and gets a complete serverless blog API: API Gateway HTTP API (apigatewayv2) → one Lambda with an internal router → DynamoDB single-table, plus an optional S3 assets bucket with presigned uploads.
+`cdk-blog-backend` — a TypeScript CDK construct library (plain tsc, no jsii/projen). A consumer writes `new BlogBackend(this, 'Blog', {...})` and gets a complete serverless blog API: API Gateway HTTP API (apigatewayv2) → one Lambda with an internal router → DynamoDB single-table, plus an optional S3 assets bucket with presigned uploads and an optional CloudFront read path (`assetsCdn`: create a distribution, add a behavior to a BYO one, or domainName-only for URL building; uploads always go direct to S3, keys prefixed `assets/` by default; new env vars flow through `src/constants.ts` like all the others).
 
 **`docs/PLAN.md` is the authoritative spec** — full route table, `BlogBackendProps` interface, DynamoDB key schemas, and implementation order live there. If the repo is still pre-implementation, the structure below describes the intended layout.
 
