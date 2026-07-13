@@ -1,6 +1,6 @@
 {
   "name": "@gardner-nick/cdk-blog-backend",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A reusable AWS CDK construct for a serverless blog backend (API Gateway HTTP API + Lambda + DynamoDB, optional S3 assets).",
   "repository": {
     "type": "git",
