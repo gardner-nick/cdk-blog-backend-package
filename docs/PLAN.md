@@ -108,7 +108,7 @@ class BlogBackend extends Construct {
 
 Wiring: create table unless provided; Function with env vars (`TABLE_NAME`, `GSI1_NAME`, `ASSETS_BUCKET_NAME`, `ASSETS_KEY_PREFIX`, `ASSETS_PUBLIC_BASE_URL`, `COMMENTS_ENABLED`, `PRESIGN_EXPIRY_SECONDS`); `table.grantReadWriteData(handler)`; `bucket.grantPut(handler)`; one `HttpLambdaIntegration` shared across `addRoutes` calls, authorizer attached per route table above. No CfnOutputs (library).
 
-Assets read path: uploads always go direct to S3 via the presigned PUT; reads are served through CloudFront (`assetsCdn`), bucket stays private via Origin Access Control. Keys are prefixed `<pathPrefix>/` (default `assets/`) so the same key works under a created distribution (default behavior) and a BYO distribution behavior (`<prefix>/*` — CloudFront forwards the full path as the S3 key). Presign response gains `publicUrl` when a CDN/domain is configured.
+Assets read path: uploads always go direct to S3 via the presigned PUT; reads are served through CloudFront (`assetsCdn`), bucket stays private via Origin Access Control. When `assetsCdn` is set, keys are prefixed `<pathPrefix>/` (default `assets/`) so the same key works under a created distribution (default behavior) and a BYO distribution behavior (`<prefix>/*` — CloudFront forwards the full path as the S3 key); without it keys stay unprefixed, so existing asset users see no change. `fileName` is validated to contain no path separators or dot segments, which is what makes the prefix an actual boundary. Presign response gains `publicUrl` when a CDN/domain is configured.
 
 ## Handler design
 

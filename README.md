@@ -144,7 +144,7 @@ POST /assets/presign-upload
 
 -> {
      "uploadUrl": "https://...",
-     "key": "assets/<uuid>-cover.png",
+     "key": "<uuid>-cover.png",
      "expiresInSeconds": 900,
      "publicUrl": "https://<cdn-domain>/assets/<uuid>-cover.png"  // when assetsCdn is set
    }
@@ -152,8 +152,12 @@ POST /assets/presign-upload
 
 `PUT` your file bytes directly to `uploadUrl` with a matching
 `Content-Type` header. `presignExpiry` controls how long the URL is valid
-(default 15 minutes). Keys are stored under a fixed prefix (default
-`assets/`, configurable via `assetsCdn.pathPrefix`).
+(default 15 minutes). `fileName` must not contain path separators (`/`, `\`)
+or be a dot segment — it's interpolated into the S3 key.
+
+Without `assetsCdn`, keys are unprefixed (`<uuid>-cover.png`). Configuring
+`assetsCdn` moves them under a prefix (default `assets/`, configurable via
+`assetsCdn.pathPrefix`) so they line up with the CloudFront behavior.
 
 Without `assetsCdn` the bucket is write-only — it's fully private and the
 construct grants the Lambda `PutObject` only — so configure a CDN (below)
@@ -212,8 +216,11 @@ Notes:
   (`addToResourcePolicy` is a no-op with a synth warning) — add the
   `cloudfront.amazonaws.com` + `AWS:SourceArn` statement to the bucket
   policy yourself. (Same limitation as the construct's `grantPut`.)
-- Objects uploaded by versions before `assetsCdn` existed have unprefixed
-  keys and won't be matched by an `assets/*` behavior.
+- Objects uploaded while `assetsCdn` was unset have unprefixed keys and won't
+  be matched by an `assets/*` behavior — a created distribution serves the
+  bucket root, so they stay reachable there, but a BYO-distribution behavior
+  won't route to them. Move them under the prefix, or serve them from
+  whatever read path you had before.
 
 ## Props
 

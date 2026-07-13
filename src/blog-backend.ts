@@ -151,9 +151,14 @@ export class BlogBackend extends Construct {
     this.table = props.table ?? this.createTable(removalPolicy);
 
     const assetsKeyPrefix = props.assetsCdn?.pathPrefix ?? DEFAULT_ASSETS_KEY_PREFIX;
-    if (!/^[A-Za-z0-9._-]+$/.test(assetsKeyPrefix)) {
+    if (
+      !/^[A-Za-z0-9._-]+$/.test(assetsKeyPrefix) ||
+      assetsKeyPrefix === '.' ||
+      assetsKeyPrefix === '..'
+    ) {
       throw new Error(
-        `assetsCdn.pathPrefix must match [A-Za-z0-9._-]+ (no slashes), got "${assetsKeyPrefix}"`
+        `assetsCdn.pathPrefix must match [A-Za-z0-9._-]+ (no slashes or dot segments), ` +
+          `got "${assetsKeyPrefix}"`
       );
     }
 
@@ -187,12 +192,10 @@ export class BlogBackend extends Construct {
         [ENV_VARS.GSI1_NAME]: GSI1_NAME,
         [ENV_VARS.COMMENTS_ENABLED]: String(enableComments),
         [ENV_VARS.PRESIGN_EXPIRY_SECONDS]: String(presignExpiry.toSeconds()),
-        ...(this.bucket
-          ? {
-              [ENV_VARS.ASSETS_BUCKET_NAME]: this.bucket.bucketName,
-              [ENV_VARS.ASSETS_KEY_PREFIX]: assetsKeyPrefix,
-            }
-          : {}),
+        ...(this.bucket ? { [ENV_VARS.ASSETS_BUCKET_NAME]: this.bucket.bucketName } : {}),
+        // Keys are prefixed only under a CDN, where the prefix has to line up
+        // with the behavior's path pattern.
+        ...(props.assetsCdn ? { [ENV_VARS.ASSETS_KEY_PREFIX]: assetsKeyPrefix } : {}),
         ...(this.assetsBaseUrl ? { [ENV_VARS.ASSETS_PUBLIC_BASE_URL]: this.assetsBaseUrl } : {}),
       },
     });
@@ -302,6 +305,12 @@ export class BlogBackend extends Construct {
     bucket: s3.IBucket,
     prefix: string
   ): { distribution?: cloudfront.IDistribution; baseUrl: string } {
+    if (cdn.domainName && /:\/\/|\//.test(cdn.domainName)) {
+      throw new Error(
+        `assetsCdn.domainName must be a bare hostname (no scheme or path), got "${cdn.domainName}"`
+      );
+    }
+
     const behaviorOptions = {
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,

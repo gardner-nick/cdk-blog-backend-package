@@ -151,7 +151,7 @@ describe('BlogBackend with enableAssets: true', () => {
       Environment: {
         Variables: Match.objectLike({
           ASSETS_BUCKET_NAME: Match.anyValue(),
-          ASSETS_KEY_PREFIX: 'assets',
+          ASSETS_KEY_PREFIX: Match.absent(),
           ASSETS_PUBLIC_BASE_URL: Match.absent(),
         }),
       },
@@ -238,6 +238,20 @@ describe('BlogBackend with a BYO distribution', () => {
     expect(construct.distribution).toBe(distribution);
   });
 
+  it('uses domainName as a CNAME override for public URLs', () => {
+    const app = new App();
+    const stack = new Stack(app, 'TestStack');
+    const distribution = new cloudfront.Distribution(stack, 'ExistingCdn', {
+      defaultBehavior: { origin: new origins.HttpOrigin('app.example.com') },
+    });
+    const construct = new BlogBackend(stack, 'Blog', {
+      assetsCdn: { distribution, domainName: 'cdn.example.com' },
+    });
+
+    expect(construct.distribution).toBe(distribution);
+    expect(construct.assetsBaseUrl).toBe('https://cdn.example.com');
+  });
+
   it('honors a custom pathPrefix in the behavior and env var', () => {
     const { template } = synthWithDistribution('img');
     template.hasResourceProperties('AWS::CloudFront::Distribution', {
@@ -265,10 +279,21 @@ describe('BlogBackend with assetsCdn.domainName only', () => {
   });
 });
 
-describe('BlogBackend assetsCdn.pathPrefix validation', () => {
-  it('rejects prefixes with slashes or empty strings', () => {
+describe('BlogBackend assetsCdn validation', () => {
+  it('rejects pathPrefixes with slashes, dot segments, or empty strings', () => {
     expect(() => synth({ assetsCdn: { pathPrefix: 'a/b' } })).toThrow(/pathPrefix/);
     expect(() => synth({ assetsCdn: { pathPrefix: '' } })).toThrow(/pathPrefix/);
+    expect(() => synth({ assetsCdn: { pathPrefix: '..' } })).toThrow(/pathPrefix/);
+    expect(() => synth({ assetsCdn: { pathPrefix: '.' } })).toThrow(/pathPrefix/);
+  });
+
+  it('rejects a domainName with a scheme or path', () => {
+    expect(() => synth({ assetsCdn: { domainName: 'https://cdn.example.com' } })).toThrow(
+      /bare hostname/
+    );
+    expect(() => synth({ assetsCdn: { domainName: 'cdn.example.com/assets' } })).toThrow(
+      /bare hostname/
+    );
   });
 });
 
